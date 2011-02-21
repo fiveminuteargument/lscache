@@ -44,36 +44,49 @@ var lscache = function() {
           return;
         }
       }
-      
-      try {
-        localStorage.setItem(key, value);
-      } catch (e) {
-        if (e.name === 'QUOTA_EXCEEDED_ERR') {
-          // If we exceeded the quota, then we will sort
-          // by the expire time, and then remove the N oldest
-          var storedKeys = [];
-          for (var i = 0; i < localStorage.length; i++) {
-            storedKey = localStorage.key(i);
-            if (storedKey.indexOf(CACHESUFFIX) > -1) {
-              var mainKey = storedKey.split(CACHESUFFIX)[0];
-              storedKeys.push({key: mainKey, expiration: parseInt(localStorage[storedKey])}); 
+
+      var stored = 0;
+      var storedKeys = [];
+      var lastRemovedKey = 0;
+
+      do {
+        try {
+          // try to store
+          localStorage.setItem(key, value);
+          stored = 1;
+          break;
+        } catch (e) {
+          // Different browsers currently handle the exception differently,
+          // reporting different names. For the moment, assume any exception
+          // will mean 'quota exceeded'
+
+          // As a one-off (during this call to set), identify and sort
+          // the expiration keys
+          if (!storedKeys.length)
+          {
+            for (var i = 0; i < localStorage.length; i++) {
+              storedKey = localStorage.key(i);
+
+              if (storedKey.indexOf(CACHESUFFIX) > -1) {
+                var mainKey = storedKey.split(CACHESUFFIX)[0];
+                storedKeys.push({key: mainKey, expiration: parseInt(localStorage[storedKey])}); 
+              }
             }
+
+            storedKeys.sort(function(a, b) { return (a.expiration - b.expiration); });
           }
-          storedKeys.sort(function(a, b) { return (a.expiration-b.expiration); });
-          
-          for (var i = 0, len = Math.min(30, storedKeys.length); i < len; i++) {
-            localStorage.removeItem(storedKeys[i].key);
-            localStorage.removeItem(expirationKey(storedKeys[i].key));
-          }
-          // TODO: This could still error if the items we removed were small and this is large
-          localStorage.setItem(key, value);          
-        } else {
-          // If it was some other error, just give up.
-          return;
+
+          // Abort if we've run out of keys to remove
+          if (lastRemovedKey > storedKeys.length - 1) break;
+
+          // Remove the next key
+          localStorage.removeItem(storedKeys[lastRemovedKey].key);
+          localStorage.removeItem(expirationKey(storedKeys[lastRemovedKey++].key));
         }
-      }
-      
-      if (time) {
+      } while (1);
+
+      // If the value was stored at all ...
+      if (stored && time) {
         localStorage.setItem(expirationKey(key), (currentTime() + time));
       } else {
         // In case they set a time earlier, remove it.
